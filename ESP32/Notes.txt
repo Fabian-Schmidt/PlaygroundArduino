@@ -1,0 +1,19 @@
+ESp32 features three SPIs(SPI, HSPI, VSPI)
+	up to 80MHz
+	up to 64 byte FIFO
+	Each SPI can be served by DMA controllers
+
+HSPI = SPI2
+VSPI = SPI3
+
+
+https://www.youtube.com/watch?v=GwShqW39jlE
+	UART0
+		GPIO1	TX
+		GPIO3	RX
+	UART1	(used by SPI Flash)
+		GPIO10	TX
+		GPIO9	RX
+	UART2
+		GPIO17	TX
+		GPIO16	RX
