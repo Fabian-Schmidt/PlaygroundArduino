@@ -59,24 +59,24 @@ void setup() {
 
   display.init(115200); // enable diagnostic output on Serial
 
-  showValue(0, 0, "Flat");
-  delay(5000);
-  showValue(0, 0, "FortyFiveUp");
-  delay(5000);
-  showValue(0, 0, "FortyFiveDown");
-  delay(5000);
-  showValue(0, 0, "SingleUp");
-  delay(5000);
-  showValue(0, 0, "SingleDown");
-  delay(5000);
-  showValue(0, 0, "DoubleUp");
-  delay(5000);
-  showValue(0, 0, "DoubleDown");
+  // showValue(0, 0, "Flat");
+  // delay(5000);
+  // showValue(0, 0, "FortyFiveUp");
+  // delay(5000);
+  // showValue(0, 0, "FortyFiveDown");
+  // delay(5000);
+  // showValue(0, 0, "SingleUp");
+  // delay(5000);
+  // showValue(0, 0, "SingleDown");
+  // delay(5000);
+  // showValue(0, 0, "DoubleUp");
+  // delay(5000);
+  // showValue(0, 0, "DoubleDown");
 
   int retry = 3;
   while (--retry > 0) {
     delay(2000);
-    /*if(!wifiConnect()) {
+    if(!wifiConnect()) {
       continue;
     }
 
@@ -86,7 +86,7 @@ void setup() {
 
     if(!getValue()) {
       continue;
-    }*/
+    }
   }
 
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
