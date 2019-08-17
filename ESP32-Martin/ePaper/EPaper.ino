@@ -3,14 +3,17 @@
 #include <GxEPD.h>
 #include <GxGDEW027C44/GxGDEW027C44.h>  // 2.7" b/w/r 264x176
 
-//#include GxEPD_BitmapExamples
+const int16_t arrow_pos_x = 145;
+const int16_t arrow_pos_y = 100;
+const int16_t value_pos_x = 20;
+const int16_t value_pos_y = 100;
+const int utcOffset = 1;        // Central European Time
 
 // FreeFonts from Adafruit_GFX
 #include <Fonts/FreeMonoBold9pt7b.h>
 #include <Fonts/FreeMonoBold12pt7b.h>
 #include <Fonts/FreeMonoBold18pt7b.h>
 #include <Fonts/FreeMonoBold24pt7b.h>
-
 
 #include <GxIO/GxIO_SPI/GxIO_SPI.h>
 #include <GxIO/GxIO.h>
@@ -21,8 +24,7 @@
 #include "ArduinoJson.h"
 
 #define uS_TO_S_FACTOR 1000000  /* Conversion factor for micro seconds to seconds */
-#define TIME_TO_SLEEP  60        /* Time ESP32 will go to sleep (in seconds) */
-
+#define TIME_TO_SLEEP  60       /* Time ESP32 will go to sleep (in seconds) */
 
 // for SPI pin definitions see e.g.:
 // C:\Users\xxx\Documents\Arduino\hardware\espressif\esp32\variants\lolin32\pins_arduino.h
@@ -56,9 +58,42 @@ void setup() {
   print_wakeup_reason();
 
   display.init(115200); // enable diagnostic output on Serial
-  delay(2000);
-  wifiConnect();
 
+  showValue(0, 0, "Flat");
+  delay(5000);
+  showValue(0, 0, "FortyFiveUp");
+  delay(5000);
+  showValue(0, 0, "FortyFiveDown");
+  delay(5000);
+  showValue(0, 0, "SingleUp");
+  delay(5000);
+  showValue(0, 0, "SingleDown");
+  delay(5000);
+  showValue(0, 0, "DoubleUp");
+  delay(5000);
+  showValue(0, 0, "DoubleDown");
+
+  int retry = 3;
+  while (--retry > 0) {
+    delay(2000);
+    /*if(!wifiConnect()) {
+      continue;
+    }
+
+    if(!setClock()) {
+      continue;
+    }
+
+    if(!getValue()) {
+      continue;
+    }*/
+  }
+
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+  Serial.flush();
+  delay(250);
+  esp_deep_sleep_start();
+  // Next line is never executed
   Serial.println("setup done");
 }
 
@@ -82,212 +117,311 @@ void print_wakeup_reason(){
   }
 }
 
-void wifiConnect() {
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print("Connecting to '");
-    Serial.print(ssid);
-    Serial.println("'");
+bool wifiConnect() {
+  if(WiFi.status() == WL_CONNECTED) {
+    return true;
+  }
+#ifdef RE_INIT_NEEDED
+  WiFi.persistent(true);
+  WiFi.mode(WIFI_STA); // switch off AP
+  WiFi.setAutoConnect(true);
+  WiFi.setAutoReconnect(true);
+  WiFi.disconnect();
+#endif
+
+  if (!WiFi.getAutoConnect() || ( WiFi.getMode() != WIFI_STA) || ((WiFi.SSID() != ssid) && String(ssid) != "........"))
+  {
+    Serial.println();
+    Serial.print("WiFi.getAutoConnect()=");
+    Serial.println(WiFi.getAutoConnect());
+    Serial.print("WiFi.SSID()=");
+    Serial.println(WiFi.SSID());
+    WiFi.mode(WIFI_STA); // switch off AP
+    Serial.print("Connecting to ");
+    Serial.println(ssid);
     WiFi.begin(ssid, password);
-    int count = 30;
-    while (count > 0 && WiFi.status() != WL_CONNECTED) {
-      count--;
-      delay(500);
-      Serial.print(F("."));
-    }
-    Serial.println("");
-    if(count == 0){
-      delay(1000);
-    }
   }
 
+  int ConnectTimeout = 30; // 15 seconds
+  while (WiFi.status() != WL_CONNECTED) {
+    if (--ConnectTimeout <= 0)
+    {
+      Serial.println();
+      Serial.println("WiFi connect timeout");
+      return false;
+    }
+    delay(500);
+    Serial.print(".");
+    Serial.print(WiFi.status());
+  }
+  Serial.println();
   Serial.println("WiFi connected");
-  Serial.println("IP address: ");
+
+  Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
   delay(2000);
 
-  setClock();
+  return true;
 }
 
-// Not sure if WiFiClientSecure checks the validity date of the certificate. 
-// Setting clock just to be sure...
-void setClock() {
+const int validMinTime = (8 * 3600 * 2);
+
+bool setClock() {
   time_t nowSecs = time(nullptr);
-  if(nowSecs < 8 * 3600 * 2) {
+  if(nowSecs < validMinTime) {
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   
-    Serial.print(F("Waiting for NTP time sync: "));
+    Serial.print("Waiting for NTP time sync: ");
     nowSecs = time(nullptr);
-    int count = 30;
-    while (count > 0 && nowSecs < 8 * 3600 * 2) {
-      count--;
+    int ConnectTimeout = 30; // 15 seconds
+    while (nowSecs < validMinTime) {
+      if (--ConnectTimeout <= 0)
+      {
+        Serial.println();
+        Serial.println("Waiting for NTP time timeout");
+        return false;
+      }
       delay(500);
-      Serial.print(F("."));
+      Serial.print(".");
       yield();
       nowSecs = time(nullptr);
     }
+    Serial.println();
   }
 
-  Serial.println();
   struct tm timeinfo;
   gmtime_r(&nowSecs, &timeinfo);
-  Serial.print(F("Current time: "));
-  Serial.print(asctime(&timeinfo));
+  Serial.print("Current time: ");
+  Serial.println(asctime(&timeinfo));
+  return true;
 }
 
 RTC_DATA_ATTR double lastValueDate = 0;
 
-void loop() {
-  if ((WiFi.status() == WL_CONNECTED)) { //Check the current connection status
-    HTTPClient http;
-    http.begin(api_url, root_ca); //Specify the URL and certificate
-    http.addHeader("accept", "application/json");
-    http.addHeader("api_secret", api_secret);
-    int httpCode = http.GET();    //Make the request
+bool getValue() {
+  bool ret = false;
+  HTTPClient http;
+  http.begin(api_url, root_ca); //Specify the URL and certificate
+  http.addHeader("accept", "application/json");
+  http.addHeader("api_secret", api_secret);
+  int httpCode = http.GET();    //Make the request
 
-    if (httpCode > 0) { //Check for the returning code
-      String payload = http.getString();
-      if (httpCode == 200) {
-        // Allocate the JSON document
-        // Use https://arduinojson.org/v6/assistant/ to compute the capacity.
-        const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_ARRAY_SIZE(2) + 600;
-        DynamicJsonDocument doc(capacity);
-        auto error = deserializeJson(doc, payload); //Parse message
-        if (error) { //Check for errors in parsing
-          Serial.println("Parsing failed");
-          Serial.println(payload);
-        } else {
-          JsonObject root_0 = doc[0];
-          const char* root_0_type = root_0["type"];
-          if(strcmp(root_0_type, "sgv") == 0) {
-            double date = root_0["date"].as<double>();
-            date = date / 1000;
-            Serial.println(date);
-            if(lastValueDate != date) {
-              lastValueDate = date;
-
-              int totalSeconds = (int)date;
-              time_t rawtime = (time_t)totalSeconds;
-              struct tm * timeinfo;
-              timeinfo = localtime (&rawtime);
-              const char* dateString = asctime(timeinfo);
-              
-              //const char* dateString = root_0["dateString"];
-              const char* direction = root_0["direction"];
-              //DoubleDown, DoubleUp, SingleDown, SingleUp, FortyFiveDown, FortyFiveUp, Flat
-              int sgv = root_0["sgv"];
-              Serial.println(sgv);
-              float val = convertSGV(sgv);
-              Serial.println(val);
-              showValue(dateString, val, direction, &FreeMonoBold18pt7b);
-            } else {
-              Serial.println("Value unchanged");
-            }
-          }
-        }
-      } else {
-        Serial.println(httpCode);
-        Serial.println(payload);
-      }
-      esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-      Serial.flush();
-      delay(100);
-      esp_deep_sleep_start();
-      delay(60000);
-    } else {
-      Serial.println("Error on HTTP request");
-      Serial.println(httpCode);
-      delay(1000);
-    }
-
-    http.end(); //Free the resources
+  if (httpCode < 0) { //Check for the returning code
+    Serial.print("Error on HTTP request ");
+    Serial.println(httpCode);
   } else {
-    delay(1000);
-    wifiConnect();
+    String payload = http.getString();
+    if (httpCode != 200) {
+      Serial.print("Error on HTTP request ");
+      Serial.println(httpCode);
+      Serial.println(payload);
+    } else {
+      // Allocate the JSON document
+      // Use https://arduinojson.org/v6/assistant/ to compute the capacity.
+      const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_ARRAY_SIZE(2) + 600;
+      DynamicJsonDocument doc(capacity);
+      auto error = deserializeJson(doc, payload); //Parse message
+      if (error) { //Check for errors in parsing
+        Serial.println("Parsing HTTP response failed");
+        Serial.println(payload);
+      } else {
+        JsonObject root_0 = doc[0];
+        const char* root_0_type = root_0["type"];
+        if(strcmp(root_0_type, "sgv") != 0) {
+          Serial.print("JSON response not of type 'sgv' ");
+          Serial.println(root_0_type);
+        } else {
+          double date = root_0["date"].as<double>();
+          date = date / 1000;
+          if(lastValueDate == date) {
+            Serial.print("Date value unchanged ");
+            Serial.println(date);
+          } else {
+            lastValueDate = date;
+            Serial.print("Date value changed ");
+            Serial.println(date);
+
+            //const char* dateString = root_0["dateString"];
+            const char* direction = root_0["direction"];
+            int sgv = root_0["sgv"];
+            Serial.print("SGV value ");
+            Serial.println(sgv);
+            showValue(date, sgv, direction);
+          }
+          ret = true;
+        }
+      }
+    }
   }
-  
-  //showBitmapExample();
-  //delay(2000);
-  //Serial.println("Without __AVR");
-  //drawCornerTest();
-  //showFont("FreeMonoBold9pt7b", &FreeMonoBold9pt7b);
-  //showFont("FreeMonoBold12pt7b", &FreeMonoBold12pt7b);
-  //showFont("FreeMonoBold18pt7b", &FreeMonoBold18pt7b);
-  //showFont("FreeMonoBold24pt7b", &FreeMonoBold24pt7b);
-  //delay(60000);
+  http.end(); //Free the resources
+  return ret;
 }
 
-//void showBitmapExample()
-//{
-//  display.drawExamplePicture(BitmapExample1, BitmapExample2, sizeof(BitmapExample1), sizeof(BitmapExample2));
-//  delay(5000);
-//}
+void loop() {
+  // Never executed 
+}
 
-float convertSGV(int sgv) {
+//float convertSGV(int sgv) {
+//  float val = (float)sgv / 18.0;
+//  val = roundf(val / 10.0) * 10.0;
+//  return val;
+//}
+void convertSGV(int sgv, char* buffer, int buffersize) {
   float val = (float)sgv / 18.0;
-  val = roundf(val * 10) / 10;
-  return val;
+  //val = roundf(val / 10.0) * 10.0;
+  snprintf(buffer, buffersize, "%.1f", val);
 }
 
-//String convertDate(long date) {
-//  //Convert to Unix Time Stamp
-//  date = date / 1000;
-//
-//  byte minute = epoch%60; epoch /= 60;
-//  byte hour   = epoch%24; epoch /= 24;
-//
-//  return "";
-//}
+#define SECS_PER_HOUR (3600UL)
 
-void showValue(const char name[],const float val, const char direction[], const GFXfont* f){
+void convertDate(double date, char* buffer, int buffersize) {
+  int totalSeconds = (int)date;
+  time_t rawtime = (time_t)totalSeconds;
+  struct tm * timeinfo;
+  timeinfo = localtime (&rawtime);
+
+  // UTC to local time
+  rawtime += (utcOffset + dstOffset (timeinfo->tm_mday, timeinfo->tm_mon, timeinfo->tm_year + 1900, timeinfo->tm_hour)) * SECS_PER_HOUR;
+  timeinfo = localtime (&rawtime);
+  
+  //strftime(buffer, buffersize, "%Y-%m-%d %H:%M:%S", timeinfo);
+  strftime(buffer, buffersize, "%d.%m %H:%M", timeinfo);
+}
+
+/* This function returns the DST offset for the current UTC time.
+ * This is valid for the EU, for other places see
+ * http://www.webexhibits.org/daylightsaving/i.html
+ * 
+ * Results have been checked for 2012-2030 (but should work since
+ * 1996 to 2099) against the following references:
+ * - http://www.uniquevisitor.it/magazine/ora-legale-italia.php
+ * - http://www.calendario-365.it/ora-legale-orario-invernale.html
+ */
+byte dstOffset (byte d, byte m, unsigned int y, byte h) {
+  // Day in March that DST starts on, at 1 am
+  byte dstOn = (31 - (5 * y / 4 + 4) % 7);
+
+  // Day in October that DST ends  on, at 2 am
+  byte dstOff = (31 - (5 * y / 4 + 1) % 7);
+
+  if ((m > 3 && m < 10) ||
+      (m == 3 && (d > dstOn || (d == dstOn && h >= 1))) ||
+      (m == 10 && (d < dstOff || (d == dstOff && h <= 1))))
+    return 1;
+  else
+    return 0;
+}
+
+void showValue(const double date, const int sgv, const char* direction){
   display.setRotation(1);
   display.fillScreen(GxEPD_WHITE);
   display.setTextColor(GxEPD_BLACK);
-  display.setFont(f);
+  display.setFont(&FreeMonoBold18pt7b);
   display.setCursor(0, 0);
   display.println();
-  display.println(name);
-  display.println(val);
-  display.update();
-}
 
-void showFont(const char name[], const GFXfont* f)
-{
-  display.setRotation(1);
-  display.fillScreen(GxEPD_WHITE);
-  display.setTextColor(GxEPD_BLACK);
-  display.setFont(f);
-  display.setCursor(0, 0);
-  display.println();
-  display.println(name);
-  display.println(" !\"#$%&'()*+,-./");
-  display.println("0123456789:;<=>?");
-  display.println("@ABCDEFGHIJKLMNO");
-  display.println("PQRSTUVWXYZ[\\]^_");
-#if defined(HAS_RED_COLOR)
-  display.setTextColor(GxEPD_RED);
-#endif
-  display.println("`abcdefghijklmno");
-  display.println("pqrstuvwxyz{|}~ ");
-  display.update();
-  delay(5000);
-}
-
-void drawCornerTest()
-{
-  display.drawCornerTest();
-  delay(5000);
-  uint8_t rotation = display.getRotation();
-  for (uint16_t r = 0; r < 4; r++)
-  {
-    display.setRotation(r);
-    display.fillScreen(GxEPD_WHITE);
-    display.fillRect(0, 0, 8, 8, GxEPD_BLACK);
-    display.fillRect(display.width() - 18, 0, 16, 16, GxEPD_BLACK);
-    display.fillRect(display.width() - 25, display.height() - 25, 24, 24, GxEPD_BLACK);
-    display.fillRect(0, display.height() - 33, 32, 32, GxEPD_BLACK);
-    display.update();
-    delay(5000);
+  char dateString[12];
+  convertDate(date, dateString, sizeof(dateString));
+  display.println(dateString);
+  //display.println();
+  
+  display.setFont(&FreeMonoBold24pt7b);
+  char val[6];
+  convertSGV(sgv, val, sizeof(val));
+  Serial.print("mmol value ");
+  Serial.println(val);
+  if(sgv < 4.0) {
+    display.setTextColor(GxEPD_RED);
   }
-  display.setRotation(rotation); // restore
+  display.setCursor(value_pos_x, value_pos_y);
+  display.println();
+  display.println(val);
+  display.setTextColor(GxEPD_BLACK);
+
+  drawDirection(direction);
+  
+  display.update();
+}
+
+void drawDirection(const char* direction){
+  //DoubleDown, DoubleUp, SingleDown, SingleUp, FortyFiveDown, FortyFiveUp, Flat
+  if(strcmp(direction, "Flat") == 0) {
+    const uint16_t color = GxEPD_BLACK;
+    drawLineY5(arrow_pos_x + 00, arrow_pos_y + 20, arrow_pos_x + 60, arrow_pos_y + 20, color);
+    drawLineX7(arrow_pos_x + 60, arrow_pos_y + 20, arrow_pos_x + 40, arrow_pos_y + 00, color);
+    drawLineX7(arrow_pos_x + 60, arrow_pos_y + 20, arrow_pos_x + 40, arrow_pos_y + 40, color);
+  } else if (strcmp(direction, "FortyFiveUp") == 0) {
+    const uint16_t color = GxEPD_BLACK;
+    drawLineX5(arrow_pos_x + 20, arrow_pos_y + 40, arrow_pos_x + 60, arrow_pos_y + 00, color);
+    drawLineX5(arrow_pos_x + 60, arrow_pos_y + 00, arrow_pos_x + 60, arrow_pos_y + 30, color);
+    drawLineY5(arrow_pos_x + 60, arrow_pos_y + 00, arrow_pos_x + 30, arrow_pos_y + 00, color);
+  } else if (strcmp(direction, "FortyFiveDown") == 0) {
+    const uint16_t color = GxEPD_BLACK;
+    drawLineX5(arrow_pos_x + 20, arrow_pos_y + 00, arrow_pos_x + 60, arrow_pos_y + 40, color);
+    drawLineX5(arrow_pos_x + 60, arrow_pos_y + 40, arrow_pos_x + 60, arrow_pos_y + 10, color);
+    drawLineY5(arrow_pos_x + 60, arrow_pos_y + 40, arrow_pos_x + 30, arrow_pos_y + 40, color);
+  } else if (strcmp(direction, "SingleUp") == 0) {
+    const uint16_t color = GxEPD_RED;
+    drawLineX5(arrow_pos_x + 30, arrow_pos_y + 60, arrow_pos_x + 30, arrow_pos_y + 00, color);
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 00, arrow_pos_x + 10, arrow_pos_y + 20, color);
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 00, arrow_pos_x + 50, arrow_pos_y + 20, color);
+  } else if (strcmp(direction, "SingleDown") == 0) {
+    const uint16_t color = GxEPD_RED;
+    drawLineX5(arrow_pos_x + 30, arrow_pos_y + 00, arrow_pos_x + 30, arrow_pos_y + 60, color);
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 60, arrow_pos_x + 10, arrow_pos_y + 40, color);
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 60, arrow_pos_x + 50, arrow_pos_y + 40, color);
+  } else if (strcmp(direction, "DoubleUp") == 0) {
+    const uint16_t color = GxEPD_RED;
+    drawLineX5(arrow_pos_x + 30, arrow_pos_y + 60, arrow_pos_x + 30, arrow_pos_y + 00, color);
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 00, arrow_pos_x + 10, arrow_pos_y + 20, color);
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 00, arrow_pos_x + 50, arrow_pos_y + 20, color);
+    
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 20, arrow_pos_x + 10, arrow_pos_y + 40, color);
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 20, arrow_pos_x + 50, arrow_pos_y + 40, color);
+  } else if (strcmp(direction, "DoubleDown") == 0) {
+    const uint16_t color = GxEPD_RED;
+    drawLineX5(arrow_pos_x + 30, arrow_pos_y + 00, arrow_pos_x + 30, arrow_pos_y + 60, color);
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 60, arrow_pos_x + 10, arrow_pos_y + 40, color);
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 60, arrow_pos_x + 50, arrow_pos_y + 40, color);
+
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 40, arrow_pos_x + 10, arrow_pos_y + 20, color);
+    drawLineX7(arrow_pos_x + 30, arrow_pos_y + 40, arrow_pos_x + 50, arrow_pos_y + 20, color);
+  }
+}
+
+void drawLineX5(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color) {
+  display.drawLine(x0 - 2, y0 - 0, x1 - 2, y1 - 0, color);
+  display.drawLine(x0 - 1, y0 - 0, x1 - 1, y1 - 0, color);
+  display.drawLine(x0 + 0, y0 + 0, x1 + 0, y1 + 0, color);
+  display.drawLine(x0 + 1, y0 + 0, x1 + 1, y1 + 0, color);
+  display.drawLine(x0 + 2, y0 + 0, x1 + 2, y1 + 0, color);
+}
+
+void drawLineX7(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color) {
+  display.drawLine(x0 - 3, y0 - 0, x1 - 3, y1 - 0, color);
+  display.drawLine(x0 - 2, y0 - 0, x1 - 2, y1 - 0, color);
+  display.drawLine(x0 - 1, y0 - 0, x1 - 1, y1 - 0, color);
+  display.drawLine(x0 + 0, y0 + 0, x1 + 0, y1 + 0, color);
+  display.drawLine(x0 + 1, y0 + 0, x1 + 1, y1 + 0, color);
+  display.drawLine(x0 + 2, y0 + 0, x1 + 2, y1 + 0, color);
+  display.drawLine(x0 + 3, y0 + 0, x1 + 3, y1 + 0, color);
+}
+
+void drawLineY5(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color) {
+  display.drawLine(x0 - 0, y0 - 2, x1 - 0, y1 - 2, color);
+  display.drawLine(x0 - 0, y0 - 1, x1 - 0, y1 - 1, color);
+  display.drawLine(x0 + 0, y0 + 0, x1 + 0, y1 + 0, color);
+  display.drawLine(x0 + 0, y0 + 1, x1 + 0, y1 + 1, color);
+  display.drawLine(x0 + 0, y0 + 2, x1 + 0, y1 + 2, color);
+}
+
+void drawLineY7(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color) {
+  display.drawLine(x0 - 0, y0 - 3, x1 - 0, y1 - 3, color);
+  display.drawLine(x0 - 0, y0 - 2, x1 - 0, y1 - 2, color);
+  display.drawLine(x0 - 0, y0 - 1, x1 - 0, y1 - 1, color);
+  display.drawLine(x0 + 0, y0 + 0, x1 + 0, y1 + 0, color);
+  display.drawLine(x0 + 0, y0 + 1, x1 + 0, y1 + 1, color);
+  display.drawLine(x0 + 0, y0 + 2, x1 + 0, y1 + 2, color);
+  display.drawLine(x0 + 0, y0 + 3, x1 + 0, y1 + 3, color);
 }

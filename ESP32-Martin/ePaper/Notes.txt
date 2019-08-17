@@ -2,7 +2,7 @@ https://www.waveshare.com/wiki/2.7inch_e-Paper_HAT_(B)
 
 264x176, 2.7inch E-Ink display HAT for Raspberry Pi, three-color
 
-arduino-1.8.9
+arduino-1.9.0-beta
 
 Libraries:
 - Adafruit GFX Library  
