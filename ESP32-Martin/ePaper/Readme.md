@@ -4,6 +4,9 @@ https://www.waveshare.com/wiki/2.7inch_e-Paper_HAT_(B)
 
 arduino-1.9.0-beta
 
+Additional Boards Manager URLs  
+  https://dl.espressif.com/dl/package_esp32_index.json
+
 Settings:
 - Board  
   `ESP32 Dev Module`
