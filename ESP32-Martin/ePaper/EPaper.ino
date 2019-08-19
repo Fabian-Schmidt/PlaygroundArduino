@@ -3,7 +3,7 @@
 #include <GxEPD.h>
 #include <GxGDEW027C44/GxGDEW027C44.h>  // 2.7" b/w/r 264x176
 
-const int16_t arrow_pos_x = 145;
+const int16_t arrow_pos_x = 200;
 const int16_t arrow_pos_y = 100;
 const int16_t value_pos_x = 20;
 const int16_t value_pos_y = 100;
@@ -286,7 +286,7 @@ void convertDate(double date, char* buffer, int buffersize) {
   timeinfo = localtime (&rawtime);
   
   //strftime(buffer, buffersize, "%Y-%m-%d %H:%M:%S", timeinfo);
-  strftime(buffer, buffersize, "%d.%m %H:%M", timeinfo);
+  strftime(buffer, buffersize, "%d.%m. %H:%M", timeinfo);
 }
 
 /* This function returns the DST offset for the current UTC time.
@@ -317,12 +317,14 @@ void showValue(const double date, const int sgv, const char* direction){
   display.setRotation(1);
   display.fillScreen(GxEPD_WHITE);
   display.setTextColor(GxEPD_BLACK);
-  display.setFont(&FreeMonoBold18pt7b);
-  display.setCursor(0, 0);
-  display.println();
+  display.setFont(&FreeMonoBold9pt7b);
+  display.setCursor(0, 15);
+  display.println(WiFi.localIP());
 
-  char dateString[12];
+  char dateString[13];
   convertDate(date, dateString, sizeof(dateString));
+  display.setFont(&FreeMonoBold18pt7b);
+  display.setCursor(0, 42);
   display.println(dateString);
   //display.println();
   
