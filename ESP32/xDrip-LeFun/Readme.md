@@ -9,6 +9,7 @@ LeFun protocol
 5. CRC
 
 # OpCodes Recieved
+
 | OpCodes | Name | Message length |
 |---------|------|----------------|
 | 0x00    | Ping | 1 |
@@ -35,59 +36,63 @@ Example
 ```
 
 Message:
-| Data | Comment
-|------|--------
-| 0xAB | 
-| 0x0B | Length
-| 0x04 | OpCode
-| 0x01 | Write
-|      | Year last two digts (not correct) - Day and Month to match Day of week for current year
-|      | (Month) -> Glucose value or 0x00 if value over 12
-|      | (Day) -> Glucose value decimal place or full value if over 12
-|      | Hour - current
-|      | Minute - current
-|      | Second - current
+
+| Data | Comment |
+|------|---------|
+| 0xAB |  |
+| 0x0B | Length |
+| 0x04 | OpCode |
+| 0x01 | Write |
+|      | Year last two digts (not correct) - Day and Month to match Day of week for current year |
+|      | (Month) -> Glucose value or 0x00 if value over 12 |
+|      | (Day) -> Glucose value decimal place or full value if over 12 |
+|      | Hour - current |
+|      | Minute - current |
+|      | Second - current |
 
 ## SetFeatures
-| Data | Comment
-|------|--------
-| 0xAB | 
-| 0x08 | Length
-| 0x08 | OpCode
-| 0x02 | Write
+
+| Data | Comment |
+|------|---------|
+| 0xAB |  |
+| 0x08 | Length |
+| 0x08 | OpCode |
+| 0x02 | Write |
 
 ### Feature / Bitmap	
 
 
 # OpCodes Response
+
 | OpCodes | Name | Message length |
 |---------|------|----------------|
 | 0x00    | Pong | 20(new) or 16(old) |
 
 ## Pong (new)
 Message:
-| Data | Comment
-|------|--------
-| 0x5A | StartByte
-| 0x14 | Length
-| 0x00 | OpCode
-| 0x00 | ff1
-| 0x00 | othree
-| 0x00 | zero2
-| 0x00 | zero3
-|      | ASCII Model name
-|      | ASCII Model name
-|      | ASCII Model name
-| 0x00 | vers1
-|      | ASCII Hardware version
-|      | ASCII Hardware version
-|      | ASCII Software version
-|      | ASCII Software version
-|      | ASCII Manufacturer
-|      | ASCII Manufacturer
-|      | ASCII Manufacturer
-|      | ASCII Manufacturer
-|      | CRC
+
+| Data | Comment |
+|------|---------|
+| 0x5A | StartByte |
+| 0x14 | Length |
+| 0x00 | OpCode |
+| 0x00 | ff1 |
+| 0x00 | othree |
+| 0x00 | zero2 |
+| 0x00 | zero3 |
+|      | ASCII Model name |
+|      | ASCII Model name |
+|      | ASCII Model name |
+| 0x00 | vers1 |
+|      | ASCII Hardware version |
+|      | ASCII Hardware version |
+|      | ASCII Software version |
+|      | ASCII Software version |
+|      | ASCII Manufacturer |
+|      | ASCII Manufacturer |
+|      | ASCII Manufacturer |
+|      | ASCII Manufacturer |
+|      | CRC |
 
 # Misc
 - [Font generator](https://rop.nl/truetype2gfx/)
