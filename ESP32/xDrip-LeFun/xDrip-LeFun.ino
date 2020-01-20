@@ -27,6 +27,7 @@ GxEPD_Class display(io, /*RST=*/16, /*BUSY=*/4);        // arbitrary selection o
 #define HAS_RED_COLOR
 #endif
 
+#define DEBUG false
 #define DISPLAY_HEIGHT 200
 #define DISPLAY_WIDTH 200
 #define DISPLAY_MARGIN 8
@@ -35,7 +36,10 @@ GxEPD_Class display(io, /*RST=*/16, /*BUSY=*/4);        // arbitrary selection o
 #define DISPLAY_TIME_FONT FreeMonoBold24pt7b
 #define DISPLAY_TIME_FONT_HEIGHT 24
 #define DISPLAY_TIME_FONT_WIDTH 26
-#define DEBUG true
+
+#define uS_TO_S_FACTOR 1000000 /* Conversion factor for micro seconds to seconds */
+//#define TIME_TO_SLEEP  10       /* Time ESP32 will go to sleep (in seconds) */
+#define TIME_TO_SLEEP 270 /* Time ESP32 will go to sleep (in seconds) 4 minutes and 30 seconds */
 
 // EPaper V-Low (3.3V), BS1-Low (4-Line)
 //   EPaper       ESP32
@@ -116,6 +120,42 @@ void printHexValue(uint8_t data[], byte length)
 #endif
 }
 
+/*
+Method to print the reason by which ESP32
+has been awaken from sleep
+*/
+void print_wakeup_reason()
+{
+#if DEBUG
+  esp_sleep_wakeup_cause_t wakeup_reason;
+
+  wakeup_reason = esp_sleep_get_wakeup_cause();
+
+  switch (wakeup_reason)
+  {
+  case ESP_SLEEP_WAKEUP_EXT0:
+    Serial.println("Wakeup caused by external signal using RTC_IO");
+    break;
+  case ESP_SLEEP_WAKEUP_EXT1:
+    Serial.println("Wakeup caused by external signal using RTC_CNTL");
+    break;
+  case ESP_SLEEP_WAKEUP_TIMER:
+    Serial.println("Wakeup caused by timer");
+    break;
+  case ESP_SLEEP_WAKEUP_TOUCHPAD:
+    Serial.println("Wakeup caused by touchpad");
+    break;
+  case ESP_SLEEP_WAKEUP_ULP:
+    Serial.println("Wakeup caused by ULP program");
+    break;
+  default:
+    Serial.printf("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
+    break;
+  }
+#endif
+}
+
+RTC_DATA_ATTR time_t last_time;
 RTC_DATA_ATTR uint8_t last_dec1 = 0x00;
 RTC_DATA_ATTR uint8_t last_dec2 = 0x00;
 RTC_DATA_ATTR uint8_t last_hour = 0x00;
@@ -249,6 +289,7 @@ class MyCallbacks : public BLECharacteristicCallbacks
 
           if (last_dec1 != decimal1 || last_dec2 != decimal2 || last_hour != hour || last_minute != minute || last_second != second)
           {
+            last_time = time(NULL);
             last_dec1 = decimal1;
             last_dec2 = decimal2;
             last_hour = hour;
@@ -256,6 +297,18 @@ class MyCallbacks : public BLECharacteristicCallbacks
             last_second = second;
 
             displayValues(decimal1, decimal2, hour, minute, second);
+
+            if (decimal1 != 0x00)
+            {
+              // disable WiFi and BT
+              esp_bt_controller_disable();
+              esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+#if DEBUG
+              Serial.flush();
+              delay(250);
+#endif
+              esp_deep_sleep_start();
+            }
           }
         }
       }
@@ -281,21 +334,32 @@ class MyCallbacks : public BLECharacteristicCallbacks
 
 void setup()
 {
+  esp_sleep_wakeup_cause_t wakeup_reason;
+  wakeup_reason = esp_sleep_get_wakeup_cause();
+
 #if DEBUG
   Serial.begin(115200);
+  delay(1000); //Take some time to open up the Serial Monitor
 
   display.init(115200); // enable diagnostic output on Serial
 
-  time_t now;
-  time(&now);
-  Serial.println(now);
-
-  displayValues(15, 8, 20, 99, 00);
-  delay(500);
+  if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED)
+  {
+    displayValues(15, 8, 20, 99, 00);
+  }
 #else
   display.init();
-  displayValues(0x00, 0x00, 0xFF, 0x00, 0x00);
+
+  if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED)
+  {
+    displayValues(0x00, 0x00, 0xFF, 0x00, 0x00);
+  }
 #endif
+
+  //Print the wakeup reason for ESP32
+  print_wakeup_reason();
+
+  esp_bt_controller_enable(ESP_BT_MODE_BLE);
 
   // Create the BLE Device
   BLEDevice::init("Lefun");
@@ -332,12 +396,8 @@ void setup()
 
 void loop()
 {
-
   if (deviceConnected)
   {
-    //pTxCharacteristic->setValue(&txValue, 1);
-    //pTxCharacteristic->notify();
-    //txValue++;
     delay(10); // bluetooth stack will go into congestion, if too many packets are sent
   }
 
