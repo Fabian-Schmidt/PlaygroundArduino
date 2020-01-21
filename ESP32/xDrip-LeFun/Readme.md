@@ -1,5 +1,22 @@
 # Overview
-LeFun protocol
+Display Glucose value from [xDrip+](https://github.com/NightscoutFoundation/xDrip) on EPaper using an ESP32 via the `LeFun Band` protocol.
+
+No changes to xDrip+ necessary works out of the box.
+
+Example is using a ESP32 DevBoard and a [1.54inch e-Paper Module (B) 200x200 Black/White/Red](https://www.waveshare.com/wiki/1.54inch_e-Paper_Module_(B)).
+
+![ESP32 DevBoard with e-Paper Module (B)](images/ESP32_epaper_xdrip.png "ESP32 DevBoard with e-Paper Module (B)")
+
+Other possibility is using the LILYGO TTGO T5 ESP32 EPaper.
+
+# Configure xDrip+
+1. Open `xDrip+`.
+2. Open `Settings`.
+3. Open `Smart Watch Features`.
+4. Open `Lefun Band`.
+5. Activate `Use LeFun Band`.
+6. Ensure `Mac address` is empty. It will be populated by `xDrip+` automatically with the address of the ESP32.
+7. Ensure `Send Readings` is active.
 
 # Message Structure
 1. `0xAB`

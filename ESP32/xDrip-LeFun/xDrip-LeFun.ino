@@ -3,6 +3,11 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+
+// WIFI
+//#include <WiFi.h>
+#include <esp_wifi.h>
+
 // EPaper
 #include <GxEPD.h>
 #include <GxGDEW0154Z04/GxGDEW0154Z04.h> // 1.54" b/w/r 200x200
@@ -38,8 +43,18 @@ GxEPD_Class display(io, /*RST=*/16, /*BUSY=*/4);        // arbitrary selection o
 #define DISPLAY_TIME_FONT_WIDTH 26
 
 #define uS_TO_S_FACTOR 1000000 /* Conversion factor for micro seconds to seconds */
-//#define TIME_TO_SLEEP  10       /* Time ESP32 will go to sleep (in seconds) */
-#define TIME_TO_SLEEP 270 /* Time ESP32 will go to sleep (in seconds) 4 minutes and 30 seconds */
+
+#if DEBUG
+
+#define TIME_TO_SLEEP 10  /* Time ESP32 will go to sleep (in seconds) */
+#define VALUE_OLD_TIME 15 /* Value will be crossed out / marked as too old. */
+
+#else
+
+#define TIME_TO_SLEEP 270    /* Time ESP32 will go to sleep (in seconds) 4 minutes and 30 seconds */
+#define VALUE_OLD_TIME 39600 /* 11 mintues. Value will be crossed out / marked as too old. */
+
+#endif
 
 // EPaper V-Low (3.3V), BS1-Low (4-Line)
 //   EPaper       ESP32
@@ -155,27 +170,32 @@ void print_wakeup_reason()
 #endif
 }
 
-RTC_DATA_ATTR time_t last_time;
+RTC_DATA_ATTR time_t last_time = 0x00;
+RTC_DATA_ATTR time_t last_time_too_old = 0x00;
+RTC_DATA_ATTR bool current_value_isOld = false;
 RTC_DATA_ATTR uint8_t last_dec1 = 0x00;
 RTC_DATA_ATTR uint8_t last_dec2 = 0x00;
 RTC_DATA_ATTR uint8_t last_hour = 0x00;
 RTC_DATA_ATTR uint8_t last_minute = 0x00;
 RTC_DATA_ATTR uint8_t last_second = 0x00;
 
-void displayValues(uint8_t decimal1, uint8_t decimal2, uint8_t hour, uint8_t minute, uint8_t second)
+void displayValues(uint8_t decimal1, uint8_t decimal2, uint8_t hour, uint8_t minute, uint8_t second, bool isOld)
 {
   char data[10];
+  uint16_t oldMarkColor = GxEPD_BLACK;
 
   display.setRotation(1);
   if (decimal1 < 4 || decimal1 > 14)
   {
     display.fillScreen(GxEPD_RED);
     display.setTextColor(GxEPD_WHITE);
+    oldMarkColor = GxEPD_WHITE;
   }
   else
   {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
+    oldMarkColor = GxEPD_BLACK;
   }
 
   // Display value
@@ -190,6 +210,10 @@ void displayValues(uint8_t decimal1, uint8_t decimal2, uint8_t hour, uint8_t min
   {
     sprintf(data, "%2d.%d", decimal1, decimal2);
     display.println(data);
+    if (isOld)
+    {
+      display.fillRect(0, ((DISPLAY_HEIGHT - 2 * DISPLAY_MARGIN) / 2) + DISPLAY_VALUE_FONT_HEIGHT / 2 - 5, 200, 10, oldMarkColor);
+    }
   }
 
   if (hour != 0xff)
@@ -290,18 +314,21 @@ class MyCallbacks : public BLECharacteristicCallbacks
           if (last_dec1 != decimal1 || last_dec2 != decimal2 || last_hour != hour || last_minute != minute || last_second != second)
           {
             last_time = time(NULL);
+            last_time_too_old = last_time + VALUE_OLD_TIME;
+            current_value_isOld = false;
             last_dec1 = decimal1;
             last_dec2 = decimal2;
             last_hour = hour;
             last_minute = minute;
             last_second = second;
 
-            displayValues(decimal1, decimal2, hour, minute, second);
+            displayValues(decimal1, decimal2, hour, minute, second, false);
 
             if (decimal1 != 0x00)
             {
               // disable WiFi and BT
               esp_bt_controller_disable();
+              btStop();
               esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
 #if DEBUG
               Serial.flush();
@@ -334,6 +361,9 @@ class MyCallbacks : public BLECharacteristicCallbacks
 
 void setup()
 {
+  esp_wifi_stop();
+  //WiFi.mode(WIFI_OFF); //WIFI_OFF, WIFI_MODE_NULL
+
   esp_sleep_wakeup_cause_t wakeup_reason;
   wakeup_reason = esp_sleep_get_wakeup_cause();
 
@@ -345,14 +375,14 @@ void setup()
 
   if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED)
   {
-    displayValues(15, 8, 20, 99, 00);
+    displayValues(15, 8, 20, 99, 00, true);
   }
 #else
   display.init();
 
   if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED)
   {
-    displayValues(0x00, 0x00, 0xFF, 0x00, 0x00);
+    displayValues(0x00, 0x00, 0xFF, 0x00, 0x00, false);
   }
 #endif
 
@@ -416,5 +446,11 @@ void loop()
   {
     // do stuff here on connecting
     oldDeviceConnected = deviceConnected;
+  }
+
+  if (!current_value_isOld && last_time_too_old != 0x00 && last_time_too_old < time(NULL))
+  {
+    current_value_isOld = true;
+    displayValues(last_dec1, last_dec2, last_hour, last_minute, last_second, current_value_isOld);
   }
 }
