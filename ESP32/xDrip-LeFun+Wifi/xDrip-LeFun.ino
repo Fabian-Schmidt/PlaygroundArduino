@@ -10,7 +10,30 @@
 
 // EPaper
 #include <GxEPD.h>
+// select the display class to use, only one
+//#include <GxGDEP015OC1/GxGDEP015OC1.h>    // 1.54" b/w
 #include <GxGDEW0154Z04/GxGDEW0154Z04.h> // 1.54" b/w/r 200x200
+//#include <GxGDEW0154Z17/GxGDEW0154Z17.h>  // 1.54" b/w/r 152x152
+//#include <GxGDEW0213I5F/GxGDEW0213I5F.h>  // 2.13" b/w 104x212 flexible
+//#include <GxGDE0213B1/GxGDE0213B1.h>      // 2.13" b/w
+//#include <GxGDEH0213B72/GxGDEH0213B72.h>  // 2.13" b/w new panel
+//#include <GxGDEH0213B73/GxGDEH0213B73.h>  // 2.13" b/w newer panel
+//#include <GxGDEW0213Z16/GxGDEW0213Z16.h>  // 2.13" b/w/r
+//#include <GxGDEH029A1/GxGDEH029A1.h>      // 2.9" b/w
+//#include <GxGDEW029T5/GxGDEW029T5.h>      // 2.9" b/w IL0373
+//#include <GxGDEW029Z10/GxGDEW029Z10.h>    // 2.9" b/w/r
+//#include <GxGDEW026T0/GxGDEW026T0.h>      // 2.6" b/w
+//#include <GxGDEW027C44/GxGDEW027C44.h>    // 2.7" b/w/r
+//#include <GxGDEW027W3/GxGDEW027W3.h>      // 2.7" b/w
+//#include <GxGDEW0371W7/GxGDEW0371W7.h>    // 3.7" b/w
+//#include <GxGDEW042T2/GxGDEW042T2.h>      // 4.2" b/w
+//#include <GxGDEW042Z15/GxGDEW042Z15.h>    // 4.2" b/w/r
+//#include <GxGDEW0583T7/GxGDEW0583T7.h>    // 5.83" b/w
+//#include <GxGDEW075T8/GxGDEW075T8.h>      // 7.5" b/w
+//#include <GxGDEW075T7/GxGDEW075T7.h>      // 7.5" b/w 800x480
+//#include <GxGDEW075Z09/GxGDEW075Z09.h>    // 7.5" b/w/r
+//#include <GxGDEW075Z08/GxGDEW075Z08.h>    // 7.5" b/w/r 800x480
+
 // FreeFonts from Adafruit_GFX
 //#include <Fonts/FreeMonoBold9pt7b.h>
 //#include <Fonts/FreeMonoBold12pt7b.h>
@@ -351,6 +374,7 @@ class MyCallbacks : public BLECharacteristicCallbacks
           if (rxValue[5] == 0x00 && rxValue[6] == 0x00)
           {
             //no value
+            return;
           }
           else if (rxValue[5] == 0x00)
           {
@@ -576,8 +600,8 @@ void loop()
     {
       utcOffset = 12;
     }
-    displayTimeZone();
     utcOffsetChanged = false;
+    displayTimeZone();
   }
 
   if (utcOffsetSave == true)
