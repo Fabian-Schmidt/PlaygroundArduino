@@ -295,6 +295,7 @@ class MyCallbacks : public BLECharacteristicCallbacks
           if (rxValue[5] == 0x00 && rxValue[6] == 0x00)
           {
             //no value
+            return;
           }
           else if (rxValue[5] == 0x00)
           {
