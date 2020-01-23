@@ -28,6 +28,14 @@
 #include "ArduinoJson.h"
 #include "Nightscout.h"
 
+// SPIFFS for Storage
+//#include "SPIFFS.h"
+//#include "FS.h"
+
+// NVS_Flash for Storage
+#include <nvs_flash.h>
+#include <nvs.h>
+
 // for SPI pin definitions see e.g.:
 // C:\Users\xxx\Documents\Arduino\hardware\espressif\esp32\variants\lolin32\pins_arduino.h
 
@@ -48,11 +56,25 @@ GxEPD_Class display(io, /*RST=*/16, /*BUSY=*/4);        // arbitrary selection o
 #define DISPLAY_TIME_FONT_HEIGHT 24
 #define DISPLAY_TIME_FONT_WIDTH 26
 
+#define BUTTON_PIN_BITMASK_GPIO_32 0x100000000 // 2^32 in hex
+#define BUTTON_PIN_BITMASK_GPIO_33 0x200000000 // 2^33 in hex
+#define BUTTON_PIN_BITMASK_GPIO_34 0x400000000 // 2^34 in hex
+#define BUTTON_PIN_BITMASK_GPIO_35 0x800000000 // 2^35 in hex
+#define BUTTON_PIN_BITMASK BUTTON_PIN_BITMASK_GPIO_32 | BUTTON_PIN_BITMASK_GPIO_33 | BUTTON_PIN_BITMASK_GPIO_35
+//#define BUTTON_PIN_BITMASK BUTTON_PIN_BITMASK_GPIO_33
+#define BTN_1 35
+#define BTN_2 32
+#define BTN_3 33
+#define BTN_UP BTN_1
+#define BTN_ENTER BTN_2
+#define BTN_DOWN BTN_3
 #define uS_TO_S_FACTOR 1000000 /* Conversion factor for micro seconds to seconds */
+#define ROTATION 1
+#define TZ utcOffset
 
 #if DEBUG
 
-#define TIME_TO_SLEEP 10  /* Time ESP32 will go to sleep (in seconds) */
+#define TIME_TO_SLEEP 270 /* Time ESP32 will go to sleep (in seconds) */
 #define VALUE_OLD_TIME 15 /* Value will be crossed out / marked as too old. */
 
 #else
@@ -81,8 +103,8 @@ BLEServer *pServer = NULL;
 BLECharacteristic *pTxCharacteristic;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
-//const int utcOffset = 1; // Central European Time
-const int utcOffset = 11; // GMT +11 (Melbourne)
+RTC_DATA_ATTR int8_t utcOffset = 1; // set default Timezone to Central European Time
+
 #define SECS_PER_HOUR (3600UL);
 #define SERVICE_UUID "000018d0-0000-1000-8000-00805f9b34fb"           // LeFun
 #define CHARACTERISTIC_UUID_RX "00002d01-0000-1000-8000-00805f9b34fb" // REPLY_CHARACTERISTIC
@@ -143,6 +165,22 @@ void printHexValue(uint8_t data[], byte length)
 #endif
 }
 
+void shutdown()
+{
+#if DEBUG
+  Serial.println("Shutting down");
+  //Serial.println(BUTTON_PIN_BITMASK);
+
+  Serial.flush();
+  delay(250);
+#endif
+  WiFi.mode(WIFI_OFF);
+  esp_bt_controller_disable();
+  btStop();
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+  esp_sleep_enable_ext1_wakeup(BUTTON_PIN_BITMASK, ESP_EXT1_WAKEUP_ANY_HIGH);
+  esp_deep_sleep_start();
+}
 /*
 Method to print the reason by which ESP32
 has been awaken from sleep
@@ -178,6 +216,8 @@ void print_wakeup_reason()
 #endif
 }
 
+RTC_DATA_ATTR bool utcOffsetSave = false;
+RTC_DATA_ATTR bool utcOffsetChanged = false;
 RTC_DATA_ATTR time_t last_time = 0x00;
 RTC_DATA_ATTR time_t last_time_too_old = 0x00;
 RTC_DATA_ATTR bool current_value_isOld = false;
@@ -192,7 +232,7 @@ void displayValues(float val, bool source_bt, uint8_t hour, uint8_t minute, uint
   char data[10];
   uint16_t oldMarkColor = GxEPD_BLACK;
 
-  display.setRotation(1);
+  display.setRotation(ROTATION);
   if (val < 4.0 || val > 14.0)
   {
     display.fillScreen(GxEPD_RED);
@@ -340,18 +380,10 @@ class MyCallbacks : public BLECharacteristicCallbacks
             bool source_bt = true;
             displayValues(val, source_bt, hour, minute, second, false);
 
-            if (decimal1 != 0x00)
+            if (val != 0.0)
             {
-              // disable WiFi and BT
-              WiFi.mode(WIFI_OFF);
-              esp_bt_controller_disable();
-              btStop();
-              esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-#if DEBUG
-              Serial.flush();
-              delay(250);
-#endif
-              esp_deep_sleep_start();
+
+              shutdown();
             }
           }
         }
@@ -376,35 +408,101 @@ class MyCallbacks : public BLECharacteristicCallbacks
   }
 };
 
+void IRAM_ATTR UP_PRESSED()
+{
+  utcOffset = utcOffset + 1;
+  utcOffsetChanged = true;
+  Serial.print("utcOffset = ");
+  Serial.println(utcOffset);
+}
+
+void IRAM_ATTR DOWN_PRESSED()
+{
+  utcOffset = utcOffset - 1;
+  utcOffsetChanged = true;
+  Serial.print("utcOffset = ");
+  Serial.println(utcOffset);
+}
+
+void IRAM_ATTR ENTER_PRESSED()
+{
+  utcOffsetSave = true;
+}
+
 void setup()
 {
   esp_sleep_wakeup_cause_t wakeup_reason;
   wakeup_reason = esp_sleep_get_wakeup_cause();
+  pinMode(BTN_UP, INPUT_PULLUP);
+  pinMode(BTN_ENTER, INPUT_PULLUP);
+  pinMode(BTN_DOWN, INPUT_PULLUP);
+
+  attachInterrupt(BTN_UP, UP_PRESSED, HIGH);
+  attachInterrupt(BTN_ENTER, ENTER_PRESSED, HIGH);
+  attachInterrupt(BTN_DOWN, DOWN_PRESSED, HIGH);
 
 #if DEBUG
   Serial.begin(115200);
-  delay(1000); //Take some time to open up the Serial Monitor
-
-  display.init(115200); // enable diagnostic output on Serial
-
-  if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED)
-  {
-    displayValues(15.0, /*Source_bt:*/ false, 20, 99, 00, true);
-    readWiFiandDisplay();
-  }
+  display.init(115200);  // enable diagnostic output on Serial
+  print_wakeup_reason(); //Print the wakeup reason for ESP32
 #else
   display.init();
-
-  if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED)
-  {
-    displayValues(0x00, 0x00, 0xFF, 0x00, 0x00, false);
-    readWiFiandDisplay();
-  }
 #endif
 
-  //Print the wakeup reason for ESP32
-  print_wakeup_reason();
+  if (wakeup_reason == ESP_SLEEP_WAKEUP_EXT0 || wakeup_reason == ESP_SLEEP_WAKEUP_EXT1) //Wakeup via Button Pressed
+  {
+#if DEBUG
+    Serial.println("Wakeup by button ");
+    print_GPIO_wake_up();
+//    displayValues(0.0, /*Source_bt:*/ false, 99, 99, 99, true);
+#endif
+    uint64_t GPIO_reason = esp_sleep_get_ext1_wakeup_status();
+    switch ((int)(log(GPIO_reason) / log(2)))
+    {
+    case BTN_UP:
+      utcOffset = utcOffset + 1;
+#if DEBUG
+      Serial.println("Button up pressed");
+      Serial.println(utcOffset);
+#endif
+      displayTimeZone();
+      break;
+    case BTN_ENTER:
+#if DEBUG
+      Serial.println("Button Enter pressed");
+#endif
+      displayValues(last_val, last_source_bt, last_hour, last_minute, last_second, current_value_isOld);
+      StartBLEAdvertising();
+      break;
+    case BTN_DOWN:
+      utcOffset = utcOffset - 1;
+#if DEBUG
+      Serial.println("Button down pressed");
+      Serial.println(utcOffset);
+#endif
+      displayTimeZone();
+      break;
+    default:
+#if DEBUG
+      Serial.println("Other Button pressed");
+#endif
+      break;
+    }
+  }
+  else if (wakeup_reason == ESP_SLEEP_WAKEUP_UNDEFINED)
+  {
+#if DEBUG
+    //displayValues(0.0, /*Source_bt:*/ false, 99, 99, 99, true);
+#endif
+    ReadFromSPIFFS();
+    displayTimeZone();
+    readWiFiandDisplay();
+  }
+  StartBLEAdvertising();
+}
 
+void StartBLEAdvertising()
+{
   esp_bt_controller_enable(ESP_BT_MODE_BLE);
 
   // Create the BLE Device
@@ -467,14 +565,39 @@ void loop()
     oldDeviceConnected = deviceConnected;
   }
 
+  if (utcOffsetChanged == true)
+  {
+
+    if (utcOffset >= 13)
+    {
+      utcOffset = -12;
+    }
+    if (utcOffset <= -13)
+    {
+      utcOffset = 12;
+    }
+    displayTimeZone();
+    utcOffsetChanged = false;
+  }
+
+  if (utcOffsetSave == true)
+  {
+    WriteToSPIFFS();
+    utcOffsetSave = false;
+#if DEBUG
+    Serial.println("utcOffset saved");
+#endif
+    displayValues(last_val, last_source_bt, last_hour, last_minute, last_second, current_value_isOld);
+  }
+
   if (!current_value_isOld && last_time_too_old != 0x00 && last_time_too_old < time(NULL))
   {
     if (!readWiFiandDisplay())
     {
-      displayValues(last_val, last_source_bt, last_hour, last_minute, last_second, current_value_isOld);
       current_value_isOld = true;
+      displayValues(last_val, last_source_bt, last_hour, last_minute, last_second, current_value_isOld);
     }
-    current_value_isOld = false;
+    shutdown();
   }
 }
 
@@ -523,6 +646,14 @@ bool readWiFiandDisplay()
     Serial.print("tm_sec : ");
     Serial.println(timeinfo->tm_sec);
 #endif
+    last_time = time(NULL);
+    last_time_too_old = last_time + VALUE_OLD_TIME;
+    current_value_isOld = false;
+    last_val = val;
+    last_hour = timeinfo->tm_hour;
+    last_minute = timeinfo->tm_min;
+    last_second = timeinfo->tm_sec;
+    bool last_source_bt = false;
     displayValues(val, source_bt, timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec, false);
     return true;
   }
@@ -535,15 +666,89 @@ bool readWiFiandDisplay()
     displayValues(val, last_dec2, last_hour, last_minute, last_second, current_value_isOld);
     
     //Display update
+*/
+}
 
-    WiFi.mode(WIFI_OFF);
-    esp_bt_controller_disable();
-    btStop();
-    esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+void print_GPIO_wake_up()
+{
+  uint64_t GPIO_reason = esp_sleep_get_ext1_wakeup_status();
+  Serial.print("GPIO that triggered the wake up: GPIO ");
+  Serial.println((log(GPIO_reason)) / log(2), 0);
+}
+
+void displayTimeZone()
+{
+  display.setRotation(ROTATION);
+
+  display.fillScreen(GxEPD_BLACK);
+  display.setTextColor(GxEPD_WHITE);
+
+  display.setFont(&DISPLAY_TIME_FONT);
+  display.setCursor(DISPLAY_MARGIN, DISPLAY_MARGIN + DISPLAY_TIME_FONT_HEIGHT);
+  display.println("TZ:");
+  display.println();
+  display.setFont(&DISPLAY_VALUE_FONT);
+  display.print("  ");
+  display.println(utcOffset);
+  display.update();
+}
+
+void WriteToSPIFFS()
+{
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES)
+  {
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    err = nvs_flash_init();
+  }
+  ESP_ERROR_CHECK(err);
+  nvs_handle my_handle;
+  err = nvs_open("storage", NVS_READWRITE, &my_handle);
+  if (err != ESP_OK)
+  {
+    Serial.printf("FATAL ERROR: Unable to open NVS\n");
+  }
+  err = nvs_set_i8(my_handle, "offset", utcOffset);
+  if (err != ESP_OK)
+  {
+    Serial.printf("FATAL ERROR: Unable to open NVS\n");
+  }
+  err = nvs_commit(my_handle);
 #if DEBUG
-    Serial.flush();
-    delay(250);
+  nvs_stats_t nvs_stats;
+  nvs_get_stats(NULL, &nvs_stats);
+  Serial.printf("Count: UsedEntries = (%d), FreeEntries = (%d), AllEntries = (%d)\n",
+                nvs_stats.used_entries, nvs_stats.free_entries, nvs_stats.total_entries);
 #endif
-    esp_deep_sleep_start();
-  */
+  nvs_close(my_handle);
+}
+
+void ReadFromSPIFFS()
+{
+  //delay(100);
+  esp_err_t err = nvs_flash_init();
+  //Serial.print(esp_err_to_name(err));
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES)
+  {
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    err = nvs_flash_init();
+  }
+  ESP_ERROR_CHECK(err);
+
+  nvs_handle my_handle;
+  err = nvs_open("storage", NVS_READONLY, &my_handle);
+  if (err != ESP_OK)
+  {
+    Serial.printf("FATAL ERROR: Unable to open NVS\n");
+    Serial.print(esp_err_to_name(err));
+  }
+
+  err = nvs_get_i8(my_handle, "offset", &utcOffset);
+  if (err != ESP_OK)
+  {
+    Serial.printf("FATAL ERROR: Unable to open NVS\n");
+  }
+  nvs_close(my_handle);
+  Serial.print("utcOffset from SPIFFS: ");
+  Serial.println(utcOffset);
 }
