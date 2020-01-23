@@ -469,12 +469,16 @@ void loop()
 
   if (!current_value_isOld && last_time_too_old != 0x00 && last_time_too_old < time(NULL))
   {
-    readWiFiandDisplay();
-    current_value_isOld = true;
+    if (!readWiFiandDisplay())
+    {
+      displayValues(last_val, last_source_bt, last_hour, last_minute, last_second, current_value_isOld);
+      current_value_isOld = true;
+    }
+    current_value_isOld = false;
   }
 }
 
-void readWiFiandDisplay()
+bool readWiFiandDisplay()
 {
   int retry = 3;
   while (--retry > 0)
@@ -520,10 +524,10 @@ void readWiFiandDisplay()
     Serial.println(timeinfo->tm_sec);
 #endif
     displayValues(val, source_bt, timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec, false);
-
-    return;
-
+    return true;
   }
+
+  return false;
 
   /*last_time = time(NULL);
     last_time_too_old = last_time + VALUE_OLD_TIME;
